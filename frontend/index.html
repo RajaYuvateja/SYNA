@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nurse Triage Command Center | Clinical Intake Aid</title>
+  <meta name="description" content="Multilingual clinical voice intake queue and nurse priority handoff dashboard." />
+  
+  <!-- Modern Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  
+  <link rel="stylesheet" href="/css/dashboard.css" />
+</head>
+<body>
+
+  <!-- Top App Navigation -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">🏥</div>
+      <div>
+        <div class="brand-title">Clinical Triage Command</div>
+        <div class="brand-sub">Intake Priority Aid &amp; Nurse Handoff</div>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <div id="ws-status" class="live-badge connecting">
+        <span class="pulse-dot"></span> CONNECTING
+      </div>
+
+      <div class="nurse-pill" onclick="promptChangeNurse()" title="Click to change Nurse ID">
+        <span>👩‍⚕️</span>
+        <span id="nurse-display">RN-Lead</span>
+      </div>
+
+      <button class="btn btn-secondary" onclick="openAnalyticsModal()">
+        <span>📊</span> Analytics
+      </button>
+
+      <button class="btn btn-secondary" onclick="loadDemoCases()">
+        <span>⚡</span> Load Demo Cases
+      </button>
+
+      <button class="btn btn-ghost" onclick="resetQueue()" title="Clear queue">
+        <span>🗑</span> Reset
+      </button>
+
+      <a href="/patient.html" class="btn btn-primary" target="_blank">
+        <span>🎙</span> Open Patient Intake
+      </a>
+    </div>
+  </header>
+
+  <!-- Main Content Layout -->
+  <main class="dashboard-container">
+    
+    <!-- Live Pre-Arrival Ambulance Alert Banner Container -->
+    <div id="ambulance-alert-container"></div>
+
+    <!-- Real-time Stats Grid -->
+    <section class="stats-grid">
+      <div class="stat-card total">
+        <div class="stat-label">Active Queue</div>
+        <div class="stat-value" id="stat-total">0</div>
+      </div>
+      <div class="stat-card critical">
+        <div class="stat-label">Critical (Immediate)</div>
+        <div class="stat-value" id="stat-critical" style="color:var(--critical-color)">0</div>
+      </div>
+      <div class="stat-card urgent">
+        <div class="stat-label">Urgent (&lt;15m)</div>
+        <div class="stat-value" id="stat-urgent" style="color:var(--urgent-color)">0</div>
+      </div>
+      <div class="stat-card concerning">
+        <div class="stat-label">Concerning (&lt;60m)</div>
+        <div class="stat-value" id="stat-concerning" style="color:var(--concerning-color)">0</div>
+      </div>
+      <div class="stat-card stable">
+        <div class="stat-label">Stable</div>
+        <div class="stat-value" id="stat-stable" style="color:var(--stable-color)">0</div>
+      </div>
+    </section>
+
+    <!-- Controls, Filter Tabs & Search -->
+    <div class="controls-bar">
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-filter="pending_review">Pending Review</button>
+        <button class="filter-tab" data-filter="critical">🔴 Critical</button>
+        <button class="filter-tab" data-filter="urgent">🟠 Urgent</button>
+        <button class="filter-tab" data-filter="concerning">🟡 Concerning</button>
+        <button class="filter-tab" data-filter="stable">🟢 Stable</button>
+        <button class="filter-tab" data-filter="verified">✓ Verified History</button>
+        <button class="filter-tab" data-filter="all">All Patients</button>
+      </div>
+
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="search-input" class="search-input" placeholder="Search complaint, language, ID..." />
+      </div>
+    </div>
+
+    <!-- Live Patient Queue Cards -->
+    <div id="queue-container" class="queue-list">
+      <!-- Injected dynamically via dashboard.js -->
+    </div>
+  </main>
+
+  <!-- Modal: Nurse Clinical Review & Override -->
+  <div class="modal-overlay" id="review-modal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">Clinical Review: <span id="review-action-label">ACCEPT</span></div>
+        <button class="modal-close" onclick="closeReviewModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--text-muted)">
+          Current Assessment: <b id="review-current-tier" style="color:#fff">CRITICAL</b>.
+          All clinical overrides require Nurse ID and justification for medical audit compliance.
+        </p>
+
+        <div class="form-group" id="review-tier-group" style="display:none">
+          <label class="form-label" for="review-new-tier">Select Target Priority Tier:</label>
+          <select id="review-new-tier" class="form-select">
+            <option value="critical">🔴 Critical - Immediate resuscitation</option>
+            <option value="urgent">🟠 Urgent - Very urgent, evaluate in &lt;15m</option>
+            <option value="concerning">🟡 Concerning - Urgent, evaluate in &lt;60m</option>
+            <option value="stable">🟢 Stable - Standard queue</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="review-reason">Clinical Rationale (Required for Audit Log):</label>
+          <textarea id="review-reason" class="form-textarea" rows="3" placeholder="Enter clinical rationale or clinical signs observed..."></textarea>
+          <div class="reason-presets">
+            <span class="preset-chip" onclick="applyReasonPreset('Cardiovascular red flag confirmed; initiating bedside ECG')">Cardiovascular signs</span>
+            <span class="preset-chip" onclick="applyReasonPreset('Vital signs stable on arrival; no respiratory distress noted')">Vitals stable</span>
+            <span class="preset-chip" onclick="applyReasonPreset('Onset discrepancy clarified with patient')">Onset clarified</span>
+            <span class="preset-chip" onclick="applyReasonPreset('Pediatric danger signs absent; feeding well')">Pediatric stable</span>
+            <span class="preset-chip" onclick="applyReasonPreset('Emergency physician bedside consult requested')">MD consult</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeReviewModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitReview()">Confirm &amp; Sign Audit Log</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: SBAR Handoff Note -->
+  <div class="modal-overlay" id="handoff-modal">
+    <div class="modal-dialog" style="max-width:650px">
+      <div class="modal-header">
+        <div class="modal-title">📋 Clinical SBAR Handoff Record</div>
+        <button class="modal-close" onclick="closeHandoffModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <textarea id="handoff-content" class="form-textarea" rows="14" readonly style="font-family:monospace;font-size:12px;background:#090d16"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeHandoffModal()">Close</button>
+        <button class="btn btn-primary" onclick="copyHandoffText()">Copy SBAR to Clipboard</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Triage Analytics & Operational Metrics -->
+  <div class="modal-overlay" id="analytics-modal">
+    <div class="modal-dialog" style="max-width:700px">
+      <div class="modal-header">
+        <div class="modal-title">📊 Clinical Triage Operations &amp; Performance Metrics</div>
+        <button class="modal-close" onclick="closeAnalyticsModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="stats-grid" style="margin-bottom:18px">
+          <div class="stat-card total">
+            <div class="stat-label">Total Sessions</div>
+            <div class="stat-value" id="analytics-total">0</div>
+          </div>
+          <div class="stat-card" style="border-left:4px solid var(--accent-cyan)">
+            <div class="stat-label">Avg Seconds to Tier</div>
+            <div class="stat-value" id="analytics-avg-time" style="color:var(--accent-cyan)">0.0s</div>
+          </div>
+          <div class="stat-card" style="border-left:4px solid #a855f7">
+            <div class="stat-label">Nurse Override Rate</div>
+            <div class="stat-value" id="analytics-override-rate" style="color:#c084fc">0.0%</div>
+          </div>
+          <div class="stat-card" style="border-left:4px solid var(--stable-color)">
+            <div class="stat-label">Nurse Accept Rate</div>
+            <div class="stat-value" id="analytics-accept-rate" style="color:var(--stable-color)">0.0%</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+          <div style="background:rgba(15,23,42,0.6);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border-color)">
+            <h4 style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Tier Distribution</h4>
+            <div id="analytics-tiers-breakdown" style="display:flex;flex-direction:column;gap:6px"></div>
+          </div>
+          <div style="background:rgba(15,23,42,0.6);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border-color)">
+            <h4 style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Speech &amp; Indic Languages</h4>
+            <div id="analytics-langs-breakdown" style="display:flex;flex-direction:column;gap:6px"></div>
+          </div>
+        </div>
+
+        <div style="background:rgba(15,23,42,0.6);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border-color)">
+          <h4 style="font-size:13px;color:var(--text-muted);margin-bottom:6px">Speech Provider &amp; Clinical Safety Audit</h4>
+          <p style="font-size:12px;color:var(--text-muted)">
+            ASR Provider: <b style="color:#fff">Sarvam AI (Saaras-v3)</b> | LLM Engine: <b style="color:#fff">GroqCloud (Llama-3.3-70B)</b><br>
+            Avg ASR Confidence: <b id="analytics-asr-conf" style="color:#38bdf8">--</b> | Red-Flag Safety Net: <b style="color:#34d399">100% Deterministic Active</b>
+          </p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeAnalyticsModal()">Close</button>
+        <button class="btn btn-secondary" onclick="loadAnalyticsData()">🔄 Refresh Metrics</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/js/dashboard.js"></script>
+</body>
+</html>

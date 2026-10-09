@@ -1,0 +1,65 @@
+[
+  {
+    "name": "Telugu cardiac red-flag",
+    "source": "relative",
+    "language": "te",
+    "turns": [
+      {
+        "native": "నా భర్తకు ఛాతీలో నొప్పి, చెమటలు పడుతున్నాయి",
+        "english": "My husband has chest pain and he is sweating a lot, severe 9/10",
+        "asr": 0.88
+      },
+      {
+        "native": "నొప్పి ఎడమ దవడకు వ్యాపిస్తోంది, 40 నిమిషాల క్రితం మొదలైంది",
+        "english": "The pain is radiating to his left jaw and it started 40 minutes ago, getting worse",
+        "asr": 0.90
+      }
+    ]
+  },
+  {
+    "name": "Tamil pediatric fever",
+    "source": "relative",
+    "language": "ta",
+    "turns": [
+      {
+        "native": "என் மகளுக்கு 2 நாட்களாக காய்ச்சல்",
+        "english": "My daughter, 4 year old, has had fever since 2 days ago",
+        "asr": 0.92
+      },
+      {
+        "native": "அவள் பால் குடிக்கிறாள், சுறுசுறுப்பாக இருக்கிறாள்",
+        "english": "She is drinking milk normally and is playing, mild",
+        "asr": 0.93
+      }
+    ]
+  },
+  {
+    "name": "Hindi trauma",
+    "source": "paramedic",
+    "language": "hi",
+    "turns": [
+      {
+        "native": "सड़क दुर्घटना, मरीज बेहोश है, बहुत खून बह रहा है",
+        "english": "Road accident crash, patient is unconscious and heavy bleeding from the leg, severe",
+        "asr": 0.85
+      }
+    ]
+  },
+  {
+    "name": "Kannada respiratory distress",
+    "source": "patient",
+    "language": "kn",
+    "turns": [
+      {
+        "native": "ಉಸಿರಾಟಕ್ಕೆ ತುಂಬಾ ತೊಂದರೆ",
+        "english": "I have difficulty breathing, it started yesterday, 6/10",
+        "asr": 0.90
+      },
+      {
+        "native": "ಇಂದು ಬೆಳಿಗ್ಗೆ ಉಸಿರು ಕಟ್ಟಿತು, ಮಾತನಾಡಲು ಆಗುತ್ತಿಲ್ಲ",
+        "english": "I am gasping and cannot speak a full sentence, it started 2 hours ago",
+        "asr": 0.87
+      }
+    ]
+  }
+]

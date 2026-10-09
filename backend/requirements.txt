@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic>=2
+httpx
+google-cloud-translate
+groq
+python-dotenv
+psycopg[binary]
+redis
+pytest
+pytest-asyncio

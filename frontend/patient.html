@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Clinical Voice Intake Aid | Patient &amp; Paramedic Portal</title>
+  <meta name="description" content="Multilingual voice symptom collection and clinical triage intake aid." />
+
+  <!-- Google Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="/css/patient.css" />
+  <style>
+    .emergency-banner {
+      display: none;
+      background: rgba(220, 38, 38, 0.25);
+      border: 2px solid #ef4444;
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 20px;
+      animation: pulse 2s infinite;
+    }
+    .preview-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 14px;
+    }
+    @media (max-width: 640px) {
+      .preview-grid { grid-template-columns: 1fr; }
+    }
+    .preview-box {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .preview-box label {
+      display: block;
+      font-size: 11px;
+      font-weight: 700;
+      color: #94a3b8;
+      margin-bottom: 6px;
+    }
+    .preview-box textarea {
+      width: 100%;
+      min-height: 80px;
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      color: #fff;
+      padding: 8px;
+      font-family: inherit;
+      font-size: 13px;
+      resize: vertical;
+      box-sizing: border-box;
+    }
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.8);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(4px);
+    }
+    .modal-card {
+      background: #0f172a;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 16px;
+      padding: 24px;
+      max-width: 440px;
+      width: 90%;
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+    }
+    .summary-card {
+      display: none;
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      border-radius: 16px;
+      padding: 16px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top App Navigation -->
+  <header class="portal-header">
+    <div class="header-brand">
+      <div class="portal-icon">🩺</div>
+      <div>
+        <div class="portal-title">Multilingual Intake Aid</div>
+        <div class="portal-subtitle">Emergency &amp; Outpatient Clinical Triage</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <button id="btn-new-patient" class="tag" style="background:rgba(244,63,94,0.2);color:#fda4af;border:1px solid rgba(244,63,94,0.4);cursor:pointer;padding:6px 12px;font-weight:700">
+        👤 New Patient
+      </button>
+      <div id="network-status" class="tag" style="background:rgba(16,185,129,0.2);color:#34d399;font-weight:600">🟢 Online</div>
+      <a href="/index.html" class="portal-subtitle" style="color:var(--brand-cyan);text-decoration:none;font-weight:600">
+        Nurse Dashboard &rarr;
+      </a>
+    </div>
+  </header>
+
+  <!-- Main Patient Intake Screen -->
+  <main class="portal-container">
+    
+    <!-- Emergency Warning Banner (Feature 5 & 11) -->
+    <div id="emergency-banner" class="emergency-banner">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span style="font-size:24px">🚨</span>
+        <strong id="emergency-title" style="color:#fee2e2;font-size:15px">POTENTIAL CARDIAC WARNING SIGN / CHEST PAIN DETECTED</strong>
+      </div>
+      <p id="emergency-desc" style="color:#fca5a5;font-size:13px;margin:0 0 10px 0;line-height:1.4">
+        Please contact emergency services immediately (Call 112 in India). Do not drive yourself. Lie down or rest comfortably.
+      </p>
+      <a href="tel:112" class="btn-confirm-yes" style="background:#dc2626;display:inline-block;padding:8px 16px;font-size:12px;text-decoration:none;font-weight:700">
+        🚨 Call Emergency Services (112)
+      </a>
+    </div>
+
+    <!-- Step 1: Intake Configuration -->
+    <div class="card">
+      <div class="intake-config-grid">
+        <div>
+          <label class="field-label" for="lang-select">Language / భాష / மொழி / भाषा:</label>
+          <select id="lang-select" class="select-styled">
+            <option value="te">తెలుగు (Telugu)</option>
+            <option value="ta">தமிழ் (Tamil)</option>
+            <option value="hi">हिन्दी (Hindi)</option>
+            <option value="kn">ಕನ್ನಡ (Kannada)</option>
+            <option value="ml">മലയാളം (Malayalam)</option>
+            <option value="bn">বাংলা (Bengali)</option>
+            <option value="mr">मराठी (Marathi)</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="field-label" for="source-select">Intake Reporter:</label>
+          <select id="source-select" class="select-styled">
+            <option value="patient">Patient (Self)</option>
+            <option value="relative">Relative / Family Member</option>
+            <option value="paramedic">Paramedic (Ambulance)</option>
+            <option value="community_health_worker">Community Health Worker (ASHA)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Ambulance Telemetry Bar (Visible when Paramedic is selected) -->
+      <div id="telemetry-bar" class="telemetry-bar" style="margin-top:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <label class="field-label" style="color:#f87171;margin-bottom:0">🚑 Paramedic Fast-Intake &amp; In-Transit Telemetry:</label>
+          <span style="font-size:11px;color:#fca5a5;font-weight:600">Hospital Pre-Arrival Streaming</span>
+        </div>
+        
+        <div class="telemetry-inputs">
+          <div>
+            <label class="field-label">ETA (Mins)</label>
+            <input type="number" id="eta-input" placeholder="e.g. 10" value="10" />
+          </div>
+          <div>
+            <label class="field-label">SpO2 (%)</label>
+            <input type="number" id="spo2-input" placeholder="e.g. 91" value="91" />
+          </div>
+          <div>
+            <label class="field-label">Heart Rate (bpm)</label>
+            <input type="number" id="hr-input" placeholder="e.g. 115" value="115" />
+          </div>
+          <div>
+            <label class="field-label">BP (mmHg)</label>
+            <input type="text" id="bp-input" placeholder="e.g. 140/90" value="140/90" />
+          </div>
+        </div>
+
+        <div style="margin-top:10px">
+          <label class="field-label">1-Tap Emergency Code:</label>
+          <div class="sample-chips">
+            <span class="sample-chip" style="background:rgba(239,68,68,0.2);color:#fca5a5" onclick="triggerFastCode('STEMI', 'Acute coronary syndrome / severe chest pain radiating to jaw with diaphoresis')">🔴 STEMI (Cardiac)</span>
+            <span class="sample-chip" style="background:rgba(234,179,8,0.2);color:#fef08a" onclick="triggerFastCode('STROKE', 'Sudden facial droop, right-sided arm weakness, slurred speech')">🟡 Code Stroke</span>
+            <span class="sample-chip" style="background:rgba(239,68,68,0.2);color:#fca5a5" onclick="triggerFastCode('TRAUMA', 'Severe motor vehicle collision with heavy haemorrhage and altered sensorium')">🔴 Major Trauma</span>
+            <span class="sample-chip" style="background:rgba(59,130,246,0.2);color:#93c5fd" onclick="triggerFastCode('RESP_FAILURE', 'Severe acute respiratory distress with gasping and cyanosis')">🔵 Resp Failure</span>
+          </div>
+        </div>
+
+        <button id="transmit-ambulance-btn" class="btn-confirm-yes" style="margin-top:12px;background:linear-gradient(135deg,#dc2626,#ef4444)" onclick="transmitAmbulanceAlert()">
+          🚨 Transmit Pre-Arrival Alert to Receiving Hospital
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 2: Voice Intake & Transcription Preview Area (Feature 1, 2, 3) -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <label class="field-label" style="margin-bottom:0;font-size:13px;font-weight:700">🎤 Voice Intake &amp; Live Speech Preview</label>
+        <span id="recording-badge" class="status-badge" style="background:rgba(255,255,255,0.08);color:#94a3b8">Ready</span>
+      </div>
+
+      <!-- Voice Recording Hero -->
+      <div id="voice-section" class="voice-hero" style="padding:16px 0">
+        <canvas id="waveform-canvas" class="waveform-canvas" style="height:48px"></canvas>
+        <div class="mic-btn-wrapper">
+          <button id="btn-mic" class="btn-mic" aria-label="Start recording audio">🎤</button>
+        </div>
+        <div id="mic-label" class="mic-status-label">Tap microphone to speak symptoms</div>
+      </div>
+
+      <!-- Editable Speech Preview Boxes (Feature 1 & 2) -->
+      <div class="preview-grid">
+        <div class="preview-box">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <label for="transcript-preview">Original Language Transcript:</label>
+            <button id="btn-retranslate" style="background:none;border:none;color:var(--brand-cyan);font-size:11px;cursor:pointer;font-weight:600">
+              🔄 Translate to English
+            </button>
+          </div>
+          <textarea id="transcript-preview" placeholder="Recognized spoken words appear here. You can review and edit before submitting."></textarea>
+        </div>
+
+        <div class="preview-box">
+          <label for="translation-preview">English Translation (Nurse View):</label>
+          <textarea id="translation-preview" placeholder="English translation appears here. You can review or edit before submitting."></textarea>
+        </div>
+      </div>
+
+      <!-- Quick Multilingual Demo Utterances -->
+      <div style="margin-top:12px">
+        <div class="quick-samples-label">Quick Multilingual Demo Utterances:</div>
+        <div class="sample-chips">
+          <span class="sample-chip" onclick="insertSample('నా భర్తకు ఛాతీలో తీవ్రమైన నొప్పి, చెమటలు పడుతున్నాయి, 9/10', 'My husband has severe chest pain, sweating, 9/10', 'te')">
+            🔴 Telugu: Cardiac (నొప్పి 9/10)
+          </span>
+          <span class="sample-chip" onclick="insertSample('ఇరవై నిమిషాల క్రితం మొదలైంది, చేతికి వ్యాపిస్తోంది', 'It started 20 minutes ago and spreads to arm', 'te')">
+            🔴 Telugu: Onset 20m ago
+          </span>
+          <span class="sample-chip" onclick="insertSample('என் மகளுக்கு 2 நாட்களாக காய்ச்சல், பால் குடிக்கிறாள்', 'My daughter has had fever for 2 days, drinking milk', 'ta')">
+            🟢 Tamil: Fever (காய்ச்சல்)
+          </span>
+          <span class="sample-chip" onclick="insertSample('सड़क दुर्घटना, मरीज बेहोश है, बहुत खून बह रहा है', 'Road accident, patient is unconscious and bleeding', 'hi')">
+            🔴 Hindi: Trauma (दुर्घटना)
+          </span>
+          <span class="sample-chip" onclick="insertSample('ಉಸಿರಾಟಕ್ಕೆ ತುಂಬಾ ತೊಂದರೆ, ಮಾತನಾಡಲು ಆಗುತ್ತಿಲ್ಲ', 'Severe difficulty breathing, unable to speak', 'kn')">
+            🔴 Kannada: Dyspnea (ಉಸಿರಾಟ)
+          </span>
+        </div>
+      </div>
+
+      <!-- Action Buttons: Clear & Submit Symptoms (Feature 1, 3, 4) -->
+      <div class="btn-row">
+        <button id="btn-clear-preview" class="mode-tab" style="padding:10px 16px;cursor:pointer">
+          ✕ Clear Text
+        </button>
+        <button id="submit-symptoms-btn" class="btn-confirm-yes" style="flex:1;cursor:pointer;padding:12px;font-weight:700">
+          ➤ Submit Symptoms to Nurse Queue
+        </button>
+      </div>
+    </div>
+
+    <!-- Step 3: Clinical Protocol Dialogue & Follow-up Prompt -->
+    <div id="dialogue-thread" class="dialogue-thread"></div>
+
+    <!-- Clarification Question Banner -->
+    <div id="question-banner" class="question-banner">
+      <div style="font-size:12px;font-weight:700;color:var(--brand-cyan);margin-bottom:4px">
+        FOLLOW-UP QUESTION / తదుపరి ప్రశ్న:
+      </div>
+      <div id="question-native" class="question-text-native"></div>
+      <div id="question-en" class="question-text-en"></div>
+    </div>
+
+    <!-- Step 4: Readback & Confirmation Card -->
+    <div id="confirm-card" class="confirm-card">
+      <div style="font-size:12px;font-weight:700;color:#34d399">
+        CONFIRM INTAKE SUMMARY / ధృవీకరించండి:
+      </div>
+      <div id="confirm-native" class="confirm-text-native"></div>
+      <button id="btn-confirm-yes" class="btn-confirm-yes">
+        <span>✓</span> Yes, that is correct
+      </button>
+    </div>
+
+    <!-- Structured Clinical Intake Summary (Feature 6 & 7) -->
+    <div id="clinical-summary-card" class="summary-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:8px;margin-bottom:12px">
+        <span style="font-weight:700;color:var(--brand-cyan);font-size:14px">📋 Clinical Intake Summary</span>
+        <span id="summary-tier-badge" class="tag" style="background:rgba(239,68,68,0.2);color:#fca5a5;font-weight:700">PRIORITY</span>
+      </div>
+      <div id="summary-content" style="font-size:12px;color:#cbd5e1;line-height:1.6"></div>
+    </div>
+
+    <!-- Step 5: Completed Handoff Banner -->
+    <div id="complete-banner" class="complete-banner">
+      <div style="font-size:32px;margin-bottom:8px">🩺</div>
+      <h3 style="color:#a7f3d0;margin-bottom:4px">Information Received by Triage Nurse</h3>
+      <p style="font-size:13px;color:var(--text-muted)">
+        Your intake report has been prioritized in the nurse queue. Please be seated in the waiting area.
+      </p>
+    </div>
+
+  </main>
+
+  <!-- Medical Safety Principle Disclaimer -->
+  <footer class="safety-disclaimer">
+    <b>Safety Principle:</b> This intake aid never diagnoses, prescribes, or recommends medical treatment. 
+    It assists clinical intake collection. All decisions and priority verifications are conducted by registered nurses.
+  </footer>
+
+  <!-- Confirmation Modal for New Patient (Feature 11) -->
+  <div id="new-patient-modal" class="modal-overlay">
+    <div class="modal-card">
+      <h3 style="color:#f43f5e;margin-top:0;font-size:16px">Start New Patient Intake Session?</h3>
+      <p style="color:#94a3b8;font-size:13px;line-height:1.5">
+        Starting a <b>New Patient</b> session will reset the current intake screen and start a separate patient intake.
+      </p>
+      <div style="background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);border-radius:10px;padding:10px;font-size:12px;color:#6ee7b7;margin:12px 0">
+        ✓ The previous patient's conversation, timestamps, and clinical records remain safely saved in the hospital database.
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
+        <button id="btn-cancel-new-patient" class="mode-tab" style="padding:8px 14px;cursor:pointer">Cancel</button>
+        <button id="btn-confirm-new-patient" class="btn-confirm-yes" style="background:#e11d48;padding:8px 16px;cursor:pointer">Confirm New Patient</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/offline-triage.js"></script>
+  <script src="/js/offline-queue.js"></script>
+  <script src="/js/patient.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(console.warn);
+      });
+    }
+    const updateNetBadge = () => {
+      const b = document.getElementById("network-status");
+      if (!b) return;
+      if (navigator.onLine) {
+        b.style.background = "rgba(16,185,129,0.2)";
+        b.style.color = "#34d399";
+        b.textContent = "🟢 Online";
+      } else {
+        b.style.background = "rgba(234,179,8,0.25)";
+        b.style.color = "#facc15";
+        b.textContent = "📡 Offline (Local Triage Active)";
+      }
+    };
+    window.addEventListener("online", updateNetBadge);
+    window.addEventListener("offline", updateNetBadge);
+    updateNetBadge();
+  </script>
+</body>
+</html>
