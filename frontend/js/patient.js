@@ -100,9 +100,16 @@ async function restoreSession() {
 
     if (s.emergency_guidance) showEmergencyBanner(s.emergency_guidance);
     if (s.summary) renderSummaryCard(s.summary);
-    if (s.next_question) {
-      $("question-native").textContent = s.next_question;
+    const qNative = s.next_question_native || (s.language === "en" ? s.next_question : "");
+    const qEn = s.next_question_en || s.next_question || "";
+    if (qNative) {
+      $("question-native").textContent = qNative;
+      $("question-en").textContent = qEn;
       $("question-banner").classList.add("visible");
+    } else {
+      $("question-banner").classList.remove("visible");
+      $("question-native").textContent = "";
+      $("question-en").textContent = "";
     }
   } catch (e) {
     console.warn("Could not restore session:", e);
@@ -347,7 +354,8 @@ async function submitSymptoms() {
 // Process Utterance Response from API
 function handleTurnResponse(reply) {
   const lang = $("lang-select")?.value || "te";
-  const questionNative = reply.next_question_native || reply.next_question;
+  const questionNative = reply.next_question_native || (lang === "en" ? reply.next_question : "");
+  const questionEn = reply.next_question_en || reply.next_question || "";
   const readbackNative = reply.readback_native || reply.readback_en;
 
   if (reply.emergency_guidance) showEmergencyBanner(reply.emergency_guidance);
@@ -356,11 +364,13 @@ function handleTurnResponse(reply) {
   // Show follow up question if available
   if (questionNative) {
     $("question-native").textContent = questionNative;
-    $("question-en").textContent = reply.next_question || "";
+    $("question-en").textContent = questionEn;
     $("question-banner").classList.add("visible");
-    appendMessage("assistant", questionNative, reply.next_question);
+    appendMessage("assistant", questionNative, questionEn);
   } else {
     $("question-banner").classList.remove("visible");
+    $("question-native").textContent = "";
+    $("question-en").textContent = "";
   }
 
   // Show readback confirmation card
@@ -408,6 +418,8 @@ function setupNewPatientHandlers() {
       $("dialogue-thread").innerHTML = "";
       clearPreviews();
       $("question-banner").classList.remove("visible");
+      $("question-native").textContent = "";
+      $("question-en").textContent = "";
       $("confirm-card").classList.remove("visible");
       $("complete-banner").classList.remove("visible");
       $("emergency-banner").style.display = "none";

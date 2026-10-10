@@ -3,21 +3,100 @@
 @tailwind utilities;
 
 :root {
-  --background: #020617;
-  --foreground: #f8fafc;
+  --background: #E8EDF2;
+  --foreground: #172033;
+  --syna-bg: #E8EDF2;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
+  color: #172033;
+  background-color: #E8EDF2;
   min-height: 100vh;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; transform: scale(0.98); }
-  to { opacity: 1; transform: scale(1); }
+/* Custom Soft Neumorphism Utilities */
+@layer utilities {
+  .neu-surface {
+    background: #E8EDF2;
+    box-shadow: 10px 10px 20px rgba(163, 177, 198, 0.45), -10px -10px 20px rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+  }
+
+  .neu-surface-sm {
+    background: #E8EDF2;
+    box-shadow: 5px 5px 12px rgba(163, 177, 198, 0.35), -5px -5px 12px rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.65);
+  }
+
+  .neu-surface-flat {
+    background: #E8EDF2;
+    border: 1px solid rgba(255, 255, 255, 0.7);
+  }
+
+  .neu-inset {
+    background: #E8EDF2;
+    box-shadow: inset 6px 6px 12px rgba(163, 177, 198, 0.35), inset -6px -6px 12px rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(163, 177, 198, 0.2);
+  }
+
+  .neu-inset-sm {
+    background: #E8EDF2;
+    box-shadow: inset 3px 3px 8px rgba(163, 177, 198, 0.3), inset -3px -3px 8px rgba(255, 255, 255, 0.75);
+    border: 1px solid rgba(163, 177, 198, 0.15);
+  }
+
+  .neu-button {
+    background: #E8EDF2;
+    box-shadow: 6px 6px 14px rgba(163, 177, 198, 0.4), -6px -6px 14px rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.7);
+    transition: all 0.15s ease;
+  }
+
+  .neu-button:hover:not(:disabled) {
+    box-shadow: 8px 8px 18px rgba(163, 177, 198, 0.48), -8px -8px 18px rgba(255, 255, 255, 0.95);
+    transform: translateY(-1px);
+  }
+
+  .neu-button:active:not(:disabled) {
+    box-shadow: inset 4px 4px 8px rgba(163, 177, 198, 0.4), inset -4px -4px 8px rgba(255, 255, 255, 0.85);
+    transform: translateY(1px);
+  }
+
+  .neu-button-primary {
+    background: #2563EB;
+    color: #FFFFFF;
+    box-shadow: 6px 6px 16px rgba(37, 99, 235, 0.35), -6px -6px 16px rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    transition: all 0.15s ease;
+  }
+
+  .neu-button-primary:hover:not(:disabled) {
+    background: #1D4ED8;
+    box-shadow: 8px 8px 20px rgba(37, 99, 235, 0.45), -8px -8px 20px rgba(255, 255, 255, 0.95);
+    transform: translateY(-1px);
+  }
+
+  .neu-button-primary:active:not(:disabled) {
+    background: #1E40AF;
+    box-shadow: inset 4px 4px 8px rgba(30, 64, 175, 0.5), inset -4px -4px 8px rgba(59, 130, 246, 0.4);
+    transform: translateY(1px);
+  }
 }
 
-.animate-fade-in {
-  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+/* Accessible focus outline */
+:focus-visible {
+  outline: 2px solid #2563EB;
+  outline-offset: 2px;
+}
+
+/* Animations */
+@keyframes pulseSubtle {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.03); opacity: 0.85; }
+}
+
+.animate-pulse-subtle {
+  animation: pulseSubtle 2s infinite ease-in-out;
 }

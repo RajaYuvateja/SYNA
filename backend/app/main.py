@@ -9,6 +9,7 @@ import sys
 import base64
 import uuid
 import json
+import asyncio
 import pathlib
 from typing import Literal
 
@@ -215,6 +216,8 @@ def public(session_id: str, s: dict) -> dict:
         "red_flags": s.get("red_flags") or [],
         "risk": s.get("risk"),
         "next_question": s.get("next_question"),
+        "next_question_en": s.get("next_question_en") or s.get("next_question"),
+        "next_question_native": s.get("next_question_native"),
         "questionnaire": s.get("questionnaire") or [],
         "patient_answers": s.get("patient_answers") or {},
         "readback_en": s.get("readback_en"),
@@ -233,6 +236,10 @@ def public(session_id: str, s: dict) -> dict:
         "summary": s.get("summary"),
         "emergency_guidance": s.get("emergency_guidance"),
         "confirmed": s.get("confirmed", False),
+        "lifecycle_status": s.get("lifecycle_status") or ("archived" if s.get("status") in ("verified", "completed", "admitted", "discharged") else "active"),
+        "archived_at": s.get("archived_at"),
+        "verified_at": s.get("verified_at") or (s.get("reviewed_at") if s.get("status") == "verified" else None),
+        "verified_by": s.get("verified_by") or (s.get("audit")[-1]["nurse_id"] if s.get("audit") and s.get("status") == "verified" else None),
     }
 
 
@@ -248,21 +255,27 @@ async def push(session_id: str):
     if session_id not in SESS:
         return
     msg = json.dumps({"type": "update", "session": public(session_id, SESS[session_id])})
+    dead = set()
     for ws in list(NURSES):
         try:
-            await ws.send_text(msg)
+            await asyncio.wait_for(ws.send_text(msg), timeout=0.5)
         except Exception:
-            NURSES.discard(ws)
+            dead.add(ws)
+    for ws in dead:
+        NURSES.discard(ws)
 
 
 async def push_reload():
     """Notifies all nurse dashboards to reload the complete queue."""
     msg = json.dumps({"type": "reload"})
+    dead = set()
     for ws in list(NURSES):
         try:
-            await ws.send_text(msg)
+            await asyncio.wait_for(ws.send_text(msg), timeout=0.5)
         except Exception:
-            NURSES.discard(ws)
+            dead.add(ws)
+    for ws in dead:
+        NURSES.discard(ws)
 
 
 # REST API Endpoints
@@ -490,7 +503,6 @@ async def save_nurse_notes_endpoint(session_id: str, b: NurseNotes):
     now_iso = datetime.now(timezone.utc).isoformat()
     s["nurse_notes"] = b.notes
     if b.mark_reviewed:
-        s["status"] = "verified"
         s["reviewed_at"] = now_iso
     s["updated_at"] = now_iso
     save_nurse_notes(session_id, b.notes, b.nurse_id)
@@ -568,9 +580,52 @@ async def process_utterance(session_id: str, u: Utterance):
     # Pipeline Stages 2-9 & 11
     engine.process_turn(s, native=native, english=english, asr_conf=conf)
 
+    # Stage 4 translation & separation for follow-up question
+    # Ensure next_question is strictly English, and next_question_native is in the patient's language
+    next_q_en = s.get("next_question_en") or s.get("next_question")
+    next_q_native = s.get("next_question_native")
+
+    lang = s.get("language", "en")
+    clean_lang = (lang or "en").split("-")[0].lower()
+
+    if next_q_en:
+        # If native question wasn't generated alongside, translate the English question to the native language
+        if not next_q_native:
+            if clean_lang == "en":
+                next_q_native = next_q_en
+            else:
+                next_q_native = await translate_from_english(next_q_en, clean_lang)
+
+        # Guard: Check if Indic characters leaked into next_q_en (Bug 1 & Bug 2 safety net)
+        if any('\u0900' <= char <= '\u0d7f' for char in next_q_en):
+            eng_trans = await translate_to_english(next_q_en, clean_lang)
+            if eng_trans and not any('\u0900' <= char <= '\u0d7f' for char in eng_trans):
+                if not next_q_native or next_q_native == next_q_en:
+                    next_q_native = next_q_en
+                next_q_en = eng_trans
+            else:
+                # Safe fallback if translation fails (never display Telugu as English, Requirement 8)
+                next_q_en = "Clinical follow-up question pending translation"
+
+        # Safety: Ensure next_q_native is non-empty
+        if not next_q_native or not next_q_native.strip():
+            next_q_native = next_q_en
+
+        s["next_question"] = next_q_en
+        s["next_question_en"] = next_q_en
+        s["next_question_native"] = next_q_native
+    else:
+        next_q_en = None
+        next_q_native = None
+        s["next_question"] = None
+        s["next_question_en"] = None
+        s["next_question_native"] = None
+
     reply = {
         "id": session_id,
-        "next_question": s.get("next_question"),
+        "next_question": next_q_en,
+        "next_question_en": next_q_en,
+        "next_question_native": next_q_native,
         "questionnaire": s.get("questionnaire", []),
         "patient_answers": s.get("patient_answers", {}),
         "readback_en": s.get("readback_en"),
@@ -582,30 +637,23 @@ async def process_utterance(session_id: str, u: Utterance):
         "session": public(session_id, s),
     }
 
-    # Stage 4 translation back to native language for patient
-    if s.get("next_question"):
-        reply["next_question_native"] = await translate_from_english(s["next_question"], s.get("language", "en"))
-    else:
-        reply["next_question_native"] = None
-
     # Stage 10 readback translation
     if s.get("readback_en"):
         reply["readback_native"] = await translate_from_english(s["readback_en"], s.get("language", "en"))
     else:
         reply["readback_native"] = None
 
-
     # Persist assistant follow-up question as a message
-    if s.get("next_question"):
+    if next_q_en:
         ai_msg_id = f"msg_{uuid.uuid4().hex[:10]}"
-        ai_native = reply.get("next_question_native") or s["next_question"]
+        ai_native = next_q_native or next_q_en
         ai_msg = {
             "id": ai_msg_id,
             "session_id": session_id,
             "sender": "assistant",
             "language": s.get("language", "en"),
             "original_text": ai_native,
-            "english_text": s["next_question"],
+            "english_text": next_q_en,
             "created_at": sub_time,
             "submitted_at": sub_time,
             "status": "sent",
@@ -616,7 +664,7 @@ async def process_utterance(session_id: str, u: Utterance):
             sender="assistant",
             language=s.get("language", "en"),
             original_text=ai_native,
-            english_text=s["next_question"],
+            english_text=next_q_en,
             msg_id=ai_msg_id,
             created_at=sub_time,
             submitted_at=sub_time,
@@ -839,6 +887,54 @@ async def correct_statement_endpoint(session_id: str, b: CorrectStatementRequest
     }
 
 
+@app.get("/api/sessions/{session_id}/sbar")
+def get_session_sbar(session_id: str):
+    """Generates structured SBAR handover record for attending nurse and physician review."""
+    s = get_session_or_404(session_id)
+    e = s.get("entities") or {}
+    r = s.get("risk") or {}
+    tier = (s.get("final_tier") or r.get("tier") or "STABLE").upper()
+    score = r.get("score", 0)
+    conf = f"{round(r.get('confidence', 0.9) * 100)}%" if r.get("confidence") else "N/A"
+    reasoning = r.get("reasoning", "Pending nurse review")
+
+    audit_lines = "\n".join(f"[{a.get('at')}] {a.get('nurse_id')} performed {a.get('action', '').upper()}: {a.get('reason')}" for a in s.get("audit", [])) or "No nurse audit actions recorded yet."
+
+    sbar_text = f"""CLINICAL SBAR INTAKE HANDOFF RECORD
+=========================================
+PATIENT IDENTIFIER: {session_id}
+INTAKE SOURCE:      {s.get('source', 'patient')} ({s.get('channel', 'kiosk')})
+LANGUAGE:           {s.get('language', 'en').upper()}
+PROVISIONAL TIER:   {tier} (Score: {score})
+
+[S - Situation]
+Chief Complaint:    {e.get('chief_complaint', 'Unspecified chief complaint')}
+Current Severity:   {e.get('severity', 'Not reported')}
+Age:                {e.get('age', 'Unknown')}
+Onset / Duration:   {e.get('onset_text', 'Not specified')}
+
+[B - Background]
+Reported Symptoms:  {', '.join(e.get('symptoms', [])) or 'None'}
+Progression:        {e.get('progression', 'Not specified')}
+Red Flags Noted:    {'; '.join(s.get('red_flags', [])) or 'None'}
+
+[A - Assessment]
+AI Triage Tier:     {tier}
+Confidence Score:   {conf}
+Clinical Reasoning: {reasoning}
+
+[R - Recommendation]
+Required Action:    Bedside nursing triage evaluation and vital signs verification.
+Assigned Priority:  {tier}
+
+AUDIT TRAIL:
+{audit_lines}
+
+DISCLAIMER: Clinical intake aid only. Never diagnoses or prescribes. Final decision made by attending nursing staff.
+========================================="""
+    return {"session_id": session_id, "sbar": sbar_text, "session": public(session_id, s)}
+
+
 @app.post("/api/sessions/{session_id}/language")
 async def update_session_language(session_id: str, req: UpdateLanguageRequest):
     """Dynamically updates the active patient session language and refreshes
@@ -885,54 +981,70 @@ async def update_session_language(session_id: str, req: UpdateLanguageRequest):
 
 
 def classify_case(s: dict) -> dict[str, bool]:
-    """Determines membership across the 5 required nurse workflow categories:
-    1. ALL - all accessible cases
-    2. PENDING - cases awaiting the next required review or action
-    3. CRITICAL - cases with active critical priority or escalation flags
-    4. REVIEW REQUIRED - cases needing nurse review, confirmation, or clarification
-    5. COMPLETED - cases whose required workflow has been completed
+    """Determines case lifecycle and workflow category membership.
+    Case lifecycle and clinical severity are maintained as separate concepts:
+    - Lifecycle: is_active vs is_archived
+    - Severity: critical, urgent, concerning, stable (calculated for active cases only)
     """
+    lifecycle = (s.get("lifecycle_status") or "").lower()
     status = (s.get("status") or "pending_review").lower()
+
+    # Archived condition: explicitly marked archived or status is verified/completed
+    is_archived = (lifecycle == "archived") or (status in ("verified", "completed", "admitted", "discharged"))
+    is_active = not is_archived
+
     risk = s.get("risk") or {}
     tier = (risk.get("tier") or s.get("final_tier") or "").lower()
     is_emergency = bool(risk.get("is_emergency")) or s.get("escalation_status") == "escalated"
-    is_completed = status in ("verified", "completed", "admitted", "discharged")
 
-    is_critical = (tier == "critical" or is_emergency) and not is_completed
-    is_pending = not is_completed
+    # Active clinical severity categories: strictly excluded if archived!
+    is_critical = is_active and (tier == "critical" or is_emergency)
+    is_urgent = is_active and (tier == "urgent" and not is_emergency)
+    is_concerning = is_active and (tier == "concerning" and not is_emergency)
+    is_stable = is_active and (tier == "stable" and not is_emergency)
 
+    # Active workflow statuses
+    is_pending = is_active
     q_list = s.get("questionnaire") or []
     has_unanswered = any(not q.get("is_answered") for q in q_list) if q_list else False
     has_flags_or_gaps = bool(s.get("gaps")) or bool(s.get("contradictions"))
-    is_review_required = not is_completed and (is_pending or has_unanswered or has_flags_or_gaps or not s.get("reviewed_at"))
+    is_review_required = is_active and (is_pending or has_unanswered or has_flags_or_gaps or not s.get("reviewed_at"))
 
     return {
-        "all": True,
+        "all": is_active,              # Default active queue contains only active cases
+        "active": is_active,           # Explicit active
         "pending": is_pending,
         "critical": is_critical,
+        "urgent": is_urgent,
+        "concerning": is_concerning,
+        "stable": is_stable,
         "review_required": is_review_required,
-        "completed": is_completed,
+        "completed": is_archived,      # Archived cases in History
+        "archived": is_archived,
+        "history": is_archived,
+        "is_active": is_active,
+        "is_archived": is_archived,
     }
 
 
 @app.get("/api/queue")
 def get_queue(
-    filter: str | None = Query(None, description="Filter by: 'all', 'pending', 'critical', 'review_required', 'completed'"),
+    filter: str | None = Query(None, description="Filter by: 'all', 'active', 'pending', 'critical', 'urgent', 'concerning', 'stable', 'review_required', 'completed', 'history', 'archived'"),
     sort_by: str = Query("newest", description="Sort by: 'newest', 'oldest', 'severity'"),
     status: str | None = Query(None, description="Legacy status compatibility"),
 ):
-    """Returns triage cases filtered by category and ordered by encounter timestamp (newest first by default)."""
+    """Returns triage cases filtered by category and ordered by encounter or verification timestamp."""
     if status and not filter:
-        if status == "verified":
-            active_filter = "completed"
+        if status in ("verified", "completed", "archived"):
+            active_filter = "history"
         elif status == "pending_review":
             active_filter = "pending"
         else:
-            active_filter = "all"
+            active_filter = "active"
     elif filter:
         active_filter = filter.lower().strip()
     else:
-        active_filter = "all"
+        active_filter = "active"
 
     tier_order = {"critical": 0, "urgent": 1, "concerning": 2, "stable": 3}
     rows = []
@@ -942,8 +1054,15 @@ def get_queue(
             continue
 
         membership = classify_case(s)
-        if active_filter == "all" or membership.get(active_filter, False):
-            rows.append(public(sid, s))
+        if active_filter in ("history", "archived", "completed"):
+            if membership.get("is_archived"):
+                rows.append(public(sid, s))
+        elif active_filter in ("all", "active"):
+            if membership.get("is_active"):
+                rows.append(public(sid, s))
+        else:
+            if membership.get(active_filter, False):
+                rows.append(public(sid, s))
 
     if sort_by == "severity":
         return sorted(
@@ -963,7 +1082,16 @@ def get_queue(
             ),
         )
     else:
-        # Default: newest case displayed first by encounter/submission timestamp, deterministic secondary sort by ID
+        # Default: newest cases first
+        if active_filter in ("history", "archived", "completed"):
+            return sorted(
+                rows,
+                key=lambda r: (
+                    r.get("verified_at") or r.get("archived_at") or r.get("reviewed_at") or r.get("submitted_at") or r.get("created_at") or "",
+                    r.get("id", ""),
+                ),
+                reverse=True,
+            )
         return sorted(
             rows,
             key=lambda r: (
@@ -976,15 +1104,43 @@ def get_queue(
 
 @app.get("/api/queue/counts")
 def get_queue_counts():
-    """Returns dynamic counts for all 5 nurse dashboard views."""
-    counts = {"all": 0, "pending": 0, "critical": 0, "review_required": 0, "completed": 0}
+    """Returns dynamic counts for active dashboard and history views derived strictly from active cases."""
+    counts = {
+        "all": 0,
+        "active": 0,
+        "pending": 0,
+        "critical": 0,
+        "urgent": 0,
+        "concerning": 0,
+        "stable": 0,
+        "review_required": 0,
+        "completed": 0,
+        "archived": 0,
+        "history": 0,
+    }
     for sid, s in SESS.items():
         if not s.get("risk") and not s.get("transcripts") and not s.get("messages"):
             continue
-        membership = classify_case(s)
-        for k in counts:
-            if membership.get(k):
-                counts[k] += 1
+        c = classify_case(s)
+        if c.get("is_active"):
+            counts["all"] += 1
+            counts["active"] += 1
+            if c.get("critical"):
+                counts["critical"] += 1
+            if c.get("urgent"):
+                counts["urgent"] += 1
+            if c.get("concerning"):
+                counts["concerning"] += 1
+            if c.get("stable"):
+                counts["stable"] += 1
+            if c.get("pending"):
+                counts["pending"] += 1
+            if c.get("review_required"):
+                counts["review_required"] += 1
+        elif c.get("is_archived"):
+            counts["completed"] += 1
+            counts["archived"] += 1
+            counts["history"] += 1
     return counts
 
 
@@ -992,6 +1148,16 @@ def get_queue_counts():
 async def review_session(session_id: str, b: Override):
     s = get_session_or_404(session_id)
     old_tier = s.get("risk", {}).get("tier", "unknown") if s.get("risk") else "unknown"
+
+    # Idempotency / Duplicate request handling (Requirement 6 & Test F):
+    if s.get("lifecycle_status") == "archived" and s.get("status") == "verified":
+        return public(session_id, s)
+
+    # Save snapshot before modifying in case persistence fails
+    snapshot_lifecycle = s.get("lifecycle_status", "active")
+    snapshot_status = s.get("status", "pending_review")
+    snapshot_tier = s.get("final_tier")
+
     try:
         engine.apply_override(
             sess=s,
@@ -1003,10 +1169,24 @@ async def review_session(session_id: str, b: Override):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    persist_audit_log(session_id, b.nurse_id, b.action, old_tier, s.get("final_tier", ""), b.reason)
-    persist_session(session_id, s)
+    # Safe persistence handling (Requirement 6 & Test G)
+    try:
+        persist_audit_log(session_id, b.nurse_id, b.action, old_tier, s.get("final_tier", ""), b.reason)
+        persist_session(session_id, s)
+    except Exception as db_err:
+        # Revert in-memory modification on persistence failure so case remains active and safe
+        s["lifecycle_status"] = snapshot_lifecycle
+        s["status"] = snapshot_status
+        s["final_tier"] = snapshot_tier
+        if s.get("audit") and s["audit"][-1].get("nurse_id") == b.nurse_id:
+            s["audit"].pop()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to persist clinical verification to database: {str(db_err)}. Patient case remains in active workflow.",
+        )
 
     await push(session_id)
+    await push_reload()
     return public(session_id, s)
 
 
@@ -1046,6 +1226,60 @@ async def reset_sessions():
     SESS.clear()
     await push_reload()
     return {"message": "All sessions reset."}
+
+
+@app.post("/api/dev/seed-cohort")
+async def seed_cohort(count: int = 62):
+    """Deterministically populates a full cohort of active cases (default 62 cases)
+    across severity tiers (12 critical, 20 urgent, 15 concerning, 15 stable) for
+    acceptance testing and audit verification.
+    """
+    tiers_dist = ["critical"] * 12 + ["urgent"] * 20 + ["concerning"] * 15 + ["stable"] * 15
+    if count != 62:
+        tiers_dist = (["critical"] * (count // 4) +
+                      ["urgent"] * (count // 4) +
+                      ["concerning"] * (count // 4) +
+                      ["stable"] * (count - 3 * (count // 4)))
+    
+    session_ids = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for i, tier in enumerate(tiers_dist):
+        sid = f"cohort_case_{i+1:03d}_{uuid.uuid4().hex[:6]}"
+        session_ids.append(sid)
+        score = 80 if tier == "critical" else (60 if tier == "urgent" else (35 if tier == "concerning" else 15))
+        s = engine.new_session(source="patient", language="en")
+        s["id"] = sid
+        s["patient_name"] = f"Cohort Patient #{i+1:02d}"
+        s["entities"] = {
+            "chief_complaint": f"Clinical cohort evaluation #{i+1}",
+            "severity": 8 if tier == "critical" else (6 if tier == "urgent" else 3),
+            "age": 30 + (i % 45),
+            "symptoms": ["chest discomfort", "shortness of breath"] if tier == "critical" else ["abdominal cramps"],
+        }
+        s["risk"] = {
+            "tier": tier,
+            "score": score,
+            "is_emergency": (tier == "critical"),
+            "confidence": 0.94,
+            "reasoning": f"Cohort initial triage criteria satisfied for tier: {tier.upper()}",
+            "disclaimer": "Triage aid only.",
+        }
+        s["final_tier"] = tier
+        s["status"] = "pending_review"
+        s["lifecycle_status"] = "active"
+        s["submitted_at"] = now_iso
+        s["transcripts"] = [{
+            "native": f"Patient presenting with complaint #{i+1} tier {tier}",
+            "english": f"Patient presenting with complaint #{i+1} tier {tier}",
+            "asr_confidence": 0.95,
+            "timestamp": now_iso,
+        }]
+        s["summary"] = engine.generate_clinical_summary(s)
+        SESS[sid] = s
+        persist_session(sid, s)
+
+    await push_reload()
+    return {"seeded": len(session_ids), "session_ids": session_ids, "active": len(SESS)}
 
 
 # Mount Frontend Static Files cleanly

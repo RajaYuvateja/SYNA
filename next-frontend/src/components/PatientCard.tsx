@@ -19,14 +19,18 @@ import {
   MessageSquare,
   Save,
   ShieldAlert,
+  ShieldCheck,
+  Lock,
+  Archive,
 } from "lucide-react";
 import { TriageSession, ReviewAction } from "@/types/triage";
 import { saveNurseNotes } from "@/lib/api";
 
 interface PatientCardProps {
   session: TriageSession;
-  onReview: (session: TriageSession, action: ReviewAction) => void;
+  onReview?: (session: TriageSession, action: ReviewAction) => void;
   onViewSbar: (session: TriageSession) => void;
+  isArchived?: boolean;
 }
 
 function formatTime(isoString?: string | null): string {
@@ -50,6 +54,7 @@ export const PatientCard: React.FC<PatientCardProps> = ({
   session,
   onReview,
   onViewSbar,
+  isArchived: isArchivedProp,
 }) => {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
@@ -57,6 +62,12 @@ export const PatientCard: React.FC<PatientCardProps> = ({
   const [nurseNotes, setNurseNotes] = useState(session.nurse_notes || "");
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesSaved, setNotesSaved] = useState(false);
+
+  const isArchived = Boolean(
+    session.lifecycle_status === "archived" ||
+    session.status === "verified" ||
+    isArchivedProp
+  );
 
   const tier = (session.final_tier || session.risk?.tier || "stable").toLowerCase();
   const chief = session.entities?.chief_complaint || "Unspecified chief complaint";
@@ -80,7 +91,7 @@ export const PatientCard: React.FC<PatientCardProps> = ({
   };
 
   const handleSaveNotes = async () => {
-    if (!nurseNotes.trim()) return;
+    if (!nurseNotes.trim() || isArchived) return;
     setSavingNotes(true);
     try {
       await saveNurseNotes(session.id, {
@@ -100,9 +111,31 @@ export const PatientCard: React.FC<PatientCardProps> = ({
   return (
     <div
       className={`rounded-2xl border bg-slate-900/75 p-5 shadow-xl backdrop-blur transition ${
-        borderColors[tier] || "border-white/10"
+        isArchived ? "border-indigo-500/30 shadow-indigo-950/20" : (borderColors[tier] || "border-white/10")
       }`}
     >
+      {/* Historical Record Audit Banner */}
+      {isArchived && (
+        <div className="mb-4 rounded-xl border border-indigo-500/30 bg-indigo-950/40 p-3.5 text-xs text-indigo-200 flex flex-wrap items-center justify-between gap-2 shadow-sm">
+          <div className="flex items-center gap-2.5">
+            <ShieldCheck className="h-4 w-4 text-indigo-400 shrink-0" />
+            <div>
+              <span className="font-bold text-indigo-300">
+                Clinical History Record — Nurse Verified &amp; Archived
+              </span>
+              <div className="text-[11px] text-indigo-300/80 mt-0.5">
+                Verified by RN: {session.verified_by || (session.audit.length ? session.audit[session.audit.length - 1].nurse_id : "RN-Lead")}
+                {(session.verified_at || session.archived_at || session.reviewed_at) && ` on ${formatTime(session.verified_at || session.archived_at || session.reviewed_at)}`}
+              </div>
+            </div>
+          </div>
+          <span className="rounded-md border border-indigo-500/40 bg-indigo-900/60 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-indigo-200 flex items-center gap-1">
+            <Lock className="h-3 w-3 text-indigo-300" />
+            <span>Read-Only Audit Record</span>
+          </span>
+        </div>
+      )}
+
       {/* Emergency Guidance Banner on Card if present */}
       {session.emergency_guidance && (
         <div className="mb-4 rounded-xl border border-red-500/50 bg-red-950/60 p-3 text-xs text-red-200 flex items-center justify-between">
@@ -130,11 +163,16 @@ export const PatientCard: React.FC<PatientCardProps> = ({
               {tier}
             </span>
             <h3 className="text-base font-bold text-white capitalize">{chief}</h3>
-            {isVerified && (
+            {isArchived ? (
+              <span className="rounded-full bg-indigo-950 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-300 border border-indigo-800 flex items-center gap-1">
+                <Lock className="h-3 w-3" />
+                <span>Archived Case ({session.final_tier || tier})</span>
+              </span>
+            ) : isVerified ? (
               <span className="rounded-full bg-emerald-950 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400 border border-emerald-800">
                 ✓ Verified ({session.final_tier || tier})
               </span>
-            )}
+            ) : null}
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
@@ -487,36 +525,49 @@ export const PatientCard: React.FC<PatientCardProps> = ({
               <Edit3 className="h-3.5 w-3.5 text-cyan-400" />
               <span>Attending Nurse Notes &amp; Verification</span>
             </label>
-            {session.reviewed_at && (
+            {(session.verified_at || session.archived_at || session.reviewed_at) && (
               <span className="text-[10px] text-emerald-400 font-medium">
-                Reviewed at: {formatTime(session.reviewed_at)}
+                {isArchived ? "Verified & Archived at: " : "Reviewed at: "}
+                {formatTime(session.verified_at || session.archived_at || session.reviewed_at)}
               </span>
             )}
           </div>
-          <textarea
-            rows={2}
-            value={nurseNotes}
-            onChange={(e) => setNurseNotes(e.target.value)}
-            placeholder="Add nurse assessment notes, bedside verification observations, or clarify patient response..."
-            className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-          />
-          <div className="flex items-center justify-between">
-            {notesSaved && (
-              <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
-                <Check className="h-3.5 w-3.5" />
-                <span>Notes Saved &amp; Intake Verified!</span>
-              </span>
-            )}
-            {!notesSaved && <span />}
-            <button
-              onClick={handleSaveNotes}
-              disabled={savingNotes || !nurseNotes.trim()}
-              className="flex items-center gap-1 rounded-lg bg-cyan-600 px-3 py-1 text-xs font-semibold text-white hover:bg-cyan-500 disabled:opacity-40 transition"
-            >
-              <Save className="h-3 w-3" />
-              <span>{savingNotes ? "Saving..." : "Save Nurse Notes"}</span>
-            </button>
-          </div>
+          {isArchived ? (
+            <div className="rounded-lg border border-white/5 bg-slate-900/90 p-2.5 text-xs text-slate-300">
+              {nurseNotes ? (
+                <span>{nurseNotes}</span>
+              ) : (
+                <span className="italic text-slate-500">Case signed off and archived without additional bedside notes.</span>
+              )}
+            </div>
+          ) : (
+            <>
+              <textarea
+                rows={2}
+                value={nurseNotes}
+                onChange={(e) => setNurseNotes(e.target.value)}
+                placeholder="Add nurse assessment notes, bedside verification observations, or clarify patient response..."
+                className="w-full rounded-lg border border-white/10 bg-slate-900 p-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+              <div className="flex items-center justify-between">
+                {notesSaved && (
+                  <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
+                    <Check className="h-3.5 w-3.5" />
+                    <span>Notes Saved &amp; Intake Verified!</span>
+                  </span>
+                )}
+                {!notesSaved && <span />}
+                <button
+                  onClick={handleSaveNotes}
+                  disabled={savingNotes || !nurseNotes.trim()}
+                  className="flex items-center gap-1 rounded-lg bg-cyan-600 px-3 py-1 text-xs font-semibold text-white hover:bg-cyan-500 disabled:opacity-40 transition"
+                >
+                  <Save className="h-3 w-3" />
+                  <span>{savingNotes ? "Saving..." : "Save Nurse Notes"}</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -524,43 +575,61 @@ export const PatientCard: React.FC<PatientCardProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
         <span className="text-xs text-slate-400">
           {session.audit.length > 0
-            ? `Audited by ${session.audit[session.audit.length - 1].nurse_id}`
+            ? `Audited & Verified by ${session.verified_by || session.audit[session.audit.length - 1].nurse_id}`
+            : isArchived
+            ? "Archived in Clinical History"
             : "Awaiting attending nurse evaluation"}
         </span>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => onReview(session, "accept")}
-            className="flex items-center gap-1 rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white shadow hover:bg-emerald-500 transition"
-          >
-            <Check className="h-3.5 w-3.5" />
-            <span>Accept {tier.toUpperCase()}</span>
-          </button>
+        {isArchived ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex items-center gap-1.5 rounded-xl border border-indigo-500/30 bg-indigo-950/60 px-3.5 py-1.5 text-xs font-bold text-indigo-300">
+              <Lock className="h-3.5 w-3.5 text-indigo-400" />
+              <span>Archived &amp; Signed-Off</span>
+            </span>
+            <button
+              onClick={() => onViewSbar(session)}
+              className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3.5 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10 transition"
+            >
+              <FileText className="h-3.5 w-3.5 text-cyan-400" />
+              <span>View Full SBAR Summary</span>
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => onReview && onReview(session, "accept")}
+              className="flex items-center gap-1 rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white shadow hover:bg-emerald-500 transition"
+            >
+              <Check className="h-3.5 w-3.5" />
+              <span>Accept {tier.toUpperCase()}</span>
+            </button>
 
-          <button
-            onClick={() => onReview(session, "escalate")}
-            className="flex items-center gap-1 rounded-xl bg-red-600/80 px-3 py-1.5 text-xs font-bold text-white shadow hover:bg-red-500 transition"
-          >
-            <ArrowUp className="h-3.5 w-3.5" />
-            <span>Escalate</span>
-          </button>
+            <button
+              onClick={() => onReview && onReview(session, "escalate")}
+              className="flex items-center gap-1 rounded-xl bg-red-600/80 px-3 py-1.5 text-xs font-bold text-white shadow hover:bg-red-500 transition"
+            >
+              <ArrowUp className="h-3.5 w-3.5" />
+              <span>Escalate</span>
+            </button>
 
-          <button
-            onClick={() => onReview(session, "downgrade")}
-            className="flex items-center gap-1 rounded-xl bg-slate-700 px-3 py-1.5 text-xs font-bold text-white shadow hover:bg-slate-600 transition"
-          >
-            <ArrowDown className="h-3.5 w-3.5" />
-            <span>Downgrade</span>
-          </button>
+            <button
+              onClick={() => onReview && onReview(session, "downgrade")}
+              className="flex items-center gap-1 rounded-xl bg-slate-700 px-3 py-1.5 text-xs font-bold text-white shadow hover:bg-slate-600 transition"
+            >
+              <ArrowDown className="h-3.5 w-3.5" />
+              <span>Downgrade</span>
+            </button>
 
-          <button
-            onClick={() => onReview(session, "override")}
-            className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-300 hover:bg-white/10 transition"
-          >
-            <Edit3 className="h-3.5 w-3.5" />
-            <span>Override</span>
-          </button>
-        </div>
+            <button
+              onClick={() => onReview && onReview(session, "override")}
+              className="flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-300 hover:bg-white/10 transition"
+            >
+              <Edit3 className="h-3.5 w-3.5" />
+              <span>Override</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

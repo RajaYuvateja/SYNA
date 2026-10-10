@@ -96,3 +96,9 @@ CREATE TABLE IF NOT EXISTS intake_metrics (
 CREATE INDEX IF NOT EXISTS idx_triage_sessions_status_tier ON triage_sessions (status, tier);
 CREATE INDEX IF NOT EXISTS idx_transcripts_session_id ON transcripts (session_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_session_id ON audit_logs (session_id);
+
+-- Safely migrate lifecycle and verification columns
+ALTER TABLE triage_sessions ADD COLUMN IF NOT EXISTS lifecycle_status TEXT DEFAULT 'active';
+ALTER TABLE triage_sessions ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+ALTER TABLE triage_sessions ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+ALTER TABLE triage_sessions ADD COLUMN IF NOT EXISTS verified_by TEXT;

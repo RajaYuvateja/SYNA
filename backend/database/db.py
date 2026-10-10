@@ -8,6 +8,7 @@ import os
 import json
 import sqlite3
 import pathlib
+import contextlib
 from datetime import datetime, timezone
 from backend.app.config import settings
 
@@ -15,6 +16,7 @@ DB_FILE = pathlib.Path(__file__).resolve().parent / "triage.db"
 
 _redis_client = None
 _redis_available = False
+_redis_checked = False
 _db_backend = "sqlite"  # 'postgres' or 'sqlite'
 
 
@@ -23,11 +25,12 @@ _db_backend = "sqlite"  # 'postgres' or 'sqlite'
 # ==========================================
 
 def get_redis():
-    global _redis_client, _redis_available
-    if _redis_client is None:
+    global _redis_client, _redis_available, _redis_checked
+    if not _redis_checked:
+        _redis_checked = True
         try:
             import redis
-            r = redis.from_url(settings.redis_url, socket_timeout=1, socket_connect_timeout=1)
+            r = redis.from_url(settings.redis_url, socket_timeout=0.2, socket_connect_timeout=0.2)
             r.ping()
             _redis_client = r
             _redis_available = True
@@ -66,10 +69,14 @@ def is_redis_active() -> bool:
 # 2. PERSISTENCE (POSTGRESQL & SQLITE)
 # ==========================================
 
+@contextlib.contextmanager
 def _get_sqlite_conn():
-    conn = sqlite3.connect(str(DB_FILE))
+    conn = sqlite3.connect(str(DB_FILE), timeout=15)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def init_db():
@@ -183,6 +190,10 @@ def init_db():
             ("last_activity_at", "TEXT"),
             ("escalation_status", "TEXT"),
             ("patient_name", "TEXT"),
+            ("lifecycle_status", "TEXT DEFAULT 'active'"),
+            ("archived_at", "TEXT"),
+            ("verified_at", "TEXT"),
+            ("verified_by", "TEXT"),
         ]:
             try:
                 cur.execute(f"ALTER TABLE triage_sessions ADD COLUMN {col_name} {col_type};")
@@ -224,11 +235,15 @@ def persist_session(session_id: str, s: dict):
         last_activity_at = s.get("last_activity_at") or now
         escalation_status = s.get("escalation_status") or ("escalated" if (risk and risk.get("is_emergency")) else "none")
         nurse_notes = s.get("nurse_notes")
+        lifecycle_status = s.get("lifecycle_status") or ("archived" if s.get("status") in ("verified", "completed", "admitted", "discharged") else "active")
+        archived_at = s.get("archived_at")
+        verified_at = s.get("verified_at") or (s.get("reviewed_at") if s.get("status") == "verified" else None)
+        verified_by = s.get("verified_by")
 
         cur.execute(
             """INSERT INTO triage_sessions 
-               (id, patient_id, source, channel, language, tier, score, is_emergency, confidence, reasoning, status, eta_minutes, handoff_note, started_at, submitted_at, reviewed_at, nurse_notes, summary_json, questionnaire_json, patient_answers_json, confirmed_at, last_activity_at, escalation_status, patient_name, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               (id, patient_id, source, channel, language, tier, score, is_emergency, confidence, reasoning, status, eta_minutes, handoff_note, started_at, submitted_at, reviewed_at, nurse_notes, summary_json, questionnaire_json, patient_answers_json, confirmed_at, last_activity_at, escalation_status, patient_name, lifecycle_status, archived_at, verified_at, verified_by, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                    tier=excluded.tier,
                    score=excluded.score,
@@ -248,6 +263,10 @@ def persist_session(session_id: str, s: dict):
                    last_activity_at=excluded.last_activity_at,
                    escalation_status=excluded.escalation_status,
                    patient_name=COALESCE(excluded.patient_name, triage_sessions.patient_name),
+                   lifecycle_status=excluded.lifecycle_status,
+                   archived_at=COALESCE(excluded.archived_at, triage_sessions.archived_at),
+                   verified_at=COALESCE(excluded.verified_at, triage_sessions.verified_at),
+                   verified_by=COALESCE(excluded.verified_by, triage_sessions.verified_by),
                    updated_at=excluded.updated_at""",
             (
                 session_id,
@@ -274,6 +293,10 @@ def persist_session(session_id: str, s: dict):
                 last_activity_at,
                 escalation_status,
                 patient_name,
+                lifecycle_status,
+                archived_at,
+                verified_at,
+                verified_by,
                 now,
                 now,
             ),
@@ -411,23 +434,34 @@ def load_all_persisted_sessions() -> dict[str, dict]:
                 summary = json.loads(r["summary_json"]) if ("summary_json" in r.keys() and r["summary_json"]) else None
                 questionnaire = json.loads(r["questionnaire_json"]) if ("questionnaire_json" in r.keys() and r["questionnaire_json"]) else []
                 patient_answers = json.loads(r["patient_answers_json"]) if ("patient_answers_json" in r.keys() and r["patient_answers_json"]) else {}
-                messages = get_session_messages(sid)
+                m_rows = cur.execute("SELECT * FROM messages WHERE session_id=? ORDER BY created_at ASC", (sid,)).fetchall()
+                messages = [dict(mr) for mr in m_rows]
+
+                r_keys = r.keys()
+                lifecycle_status = r["lifecycle_status"] if ("lifecycle_status" in r_keys and r["lifecycle_status"]) else ("archived" if r["status"] in ("verified", "completed") else "active")
+                archived_at = r["archived_at"] if "archived_at" in r_keys else None
+                verified_at = r["verified_at"] if "verified_at" in r_keys else (r["reviewed_at"] if r["status"] == "verified" else None)
+                verified_by = r["verified_by"] if "verified_by" in r_keys else (audit[-1]["nurse_id"] if audit and r["status"] == "verified" else None)
 
                 sessions[sid] = {
                     "source": r["source"],
                     "language": r["language"],
                     "channel": r["channel"],
                     "status": r["status"],
+                    "lifecycle_status": lifecycle_status,
+                    "archived_at": archived_at,
+                    "verified_at": verified_at,
+                    "verified_by": verified_by,
                     "final_tier": r["tier"],
                     "eta_minutes": r["eta_minutes"],
-                    "started_at": r["started_at"] if "started_at" in r.keys() else r["created_at"],
-                    "submitted_at": r["submitted_at"] if "submitted_at" in r.keys() else None,
-                    "reviewed_at": r["reviewed_at"] if "reviewed_at" in r.keys() else None,
-                    "confirmed_at": r["confirmed_at"] if "confirmed_at" in r.keys() else None,
-                    "last_activity_at": r["last_activity_at"] if "last_activity_at" in r.keys() else r["created_at"],
-                    "escalation_status": r["escalation_status"] if ("escalation_status" in r.keys() and r["escalation_status"]) else ("escalated" if r["is_emergency"] else "none"),
-                    "patient_name": r["patient_name"] if "patient_name" in r.keys() else None,
-                    "nurse_notes": r["nurse_notes"] if "nurse_notes" in r.keys() else "",
+                    "started_at": r["started_at"] if "started_at" in r_keys else r["created_at"],
+                    "submitted_at": r["submitted_at"] if "submitted_at" in r_keys else None,
+                    "reviewed_at": r["reviewed_at"] if "reviewed_at" in r_keys else None,
+                    "confirmed_at": r["confirmed_at"] if "confirmed_at" in r_keys else None,
+                    "last_activity_at": r["last_activity_at"] if "last_activity_at" in r_keys else r["created_at"],
+                    "escalation_status": r["escalation_status"] if ("escalation_status" in r_keys and r["escalation_status"]) else ("escalated" if r["is_emergency"] else "none"),
+                    "patient_name": r["patient_name"] if "patient_name" in r_keys else None,
+                    "nurse_notes": r["nurse_notes"] if "nurse_notes" in r_keys else "",
                     "summary": summary,
                     "questionnaire": questionnaire,
                     "patient_answers": patient_answers,
@@ -448,7 +482,7 @@ def load_all_persisted_sessions() -> dict[str, dict]:
                         "reasoning": r["reasoning"],
                         "disclaimer": "Triage intake aid only. Not a diagnosis. Final priority is set by clinical staff.",
                     } if r["tier"] else None,
-                    "confirmed": bool(r["confirmed_at"]) if "confirmed_at" in r.keys() and r["confirmed_at"] else False,
+                    "confirmed": bool(r["confirmed_at"]) if "confirmed_at" in r_keys and r["confirmed_at"] else False,
                 }
     except Exception as e:
         print(f"[Database] Warning loading persisted sessions: {e}")

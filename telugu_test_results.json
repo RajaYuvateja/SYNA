@@ -1,0 +1,37 @@
+[
+  {
+    "turn": 1,
+    "patient_telugu": "నాకు ఛాతీలో తీవ్రమైన నొప్పిగా ఉంది",
+    "patient_english": "I have severe pain in my chest",
+    "followup_telugu": "ఈ వాతాళిక నొప్పి ఎప్పుడైతే మొదలైంది?",
+    "followup_english": "When did this chest pain start?"
+  },
+  {
+    "turn": 2,
+    "patient_telugu": "నొప్పి సుమారు అరగంట క్రితం మొదలైంది",
+    "patient_english": "The pain started about half an hour ago",
+    "followup_telugu": "మీ నొప్పి మీ చేతులు, గొంతు లేదా వెనుక భాగానికి వ్యాపిస్తుందా?",
+    "followup_english": "Does the pain spread to your arm, jaw, or back?"
+  },
+  {
+    "turn": 3,
+    "patient_telugu": "ఈ నొప్పి నా ఎడమ చేతికి వ్యాపిస్తోంది",
+    "patient_english": "This pain is radiating to my left arm",
+    "followup_telugu": "వెన్నునొప్పితో పాటు మీకు శ్వాస తీసుకోవడంలో ఇబ్బంది లేదా చెమట పట్టడం అనుభవించారా?",
+    "followup_english": "Are you experiencing any shortness of breath or sweating along with the chest pain?"
+  },
+  {
+    "turn": 4,
+    "patient_telugu": "నాకు చాలా ఎక్కువగా చల్లని చెమటలు పడుతున్నాయి",
+    "patient_english": "I am sweating heavily with cold sweats",
+    "followup_telugu": "మీకు శ్వాస తీసుకోవడంలో ఇబ్బంది లేదా శ్వాస ఆగిపోయే అనుభూతి ఉందా?",
+    "followup_english": "Are you experiencing any difficulty breathing or shortness of breath?"
+  },
+  {
+    "turn": 5,
+    "patient_telugu": "నాకు తీవ్రంగా ఆయాసంగా ఉంది, శ్వాస తీసుకోవడం కష్టంగా ఉంది",
+    "patient_english": "I feel severe breathlessness and it is hard to breathe",
+    "followup_telugu": "మీకు ఇప్పుడు మాట్లాడటంలో ఇబ్బంది లేదా అర్థం రాని మాటలు వస్తున్నాయా?",
+    "followup_english": "Are you experiencing any difficulty speaking or slurred speech right now?"
+  }
+]

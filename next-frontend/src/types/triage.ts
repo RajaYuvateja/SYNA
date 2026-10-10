@@ -139,14 +139,20 @@ export interface SymptomQuestion {
 
 export type PatientAnswersMap = Record<string, AnswerChoice>;
 
-export type QueueFilter = "all" | "pending" | "critical" | "review_required" | "completed";
+export type QueueFilter = "all" | "active" | "pending" | "critical" | "review_required" | "completed" | "history";
 
 export interface QueueCounts {
   all: number;
+  active?: number;
   pending: number;
   critical: number;
+  urgent?: number;
+  concerning?: number;
+  stable?: number;
   review_required: number;
   completed: number;
+  archived?: number;
+  history?: number;
 }
 
 export interface TriageSession {
@@ -156,6 +162,10 @@ export interface TriageSession {
   language: string;
   channel: string;
   status: "pending_review" | "verified" | "completed" | string;
+  lifecycle_status?: "active" | "archived" | string;
+  archived_at?: string | null;
+  verified_at?: string | null;
+  verified_by?: string | null;
   final_tier?: PriorityTier | null;
   eta_minutes?: number | null;
   telemetry?: TelemetryVitals | null;
@@ -168,6 +178,8 @@ export interface TriageSession {
   red_flags: string[];
   risk?: RiskAssessment | null;
   next_question?: string | null;
+  next_question_en?: string | null;
+  next_question_native?: string | null;
   questionnaire?: SymptomQuestion[];
   patient_answers?: PatientAnswersMap;
   readback_en?: string | null;

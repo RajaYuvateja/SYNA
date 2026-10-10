@@ -1233,18 +1233,47 @@ def process_turn(sess: dict, native: str, english: str, asr_conf: float = 0.9, n
 
     # Prioritize resolving contradictions, then context-aware LLM follow-up or protocol gap question
     if sess["contradictions"]:
-        sess["next_question"] = sess["contradictions"][0]["clarification"]
+        clarification = sess["contradictions"][0]["clarification"]
+        sess["next_question"] = clarification
+        sess["next_question_en"] = clarification
+        sess["next_question_native"] = None
     elif sess["gaps"]:
         try:
             from backend.app.groq_client import generate_followup_question
-            llm_q = generate_followup_question(english, e, sess["gaps"], sess.get("language", "en"), history=turns)
-            sess["next_question"] = llm_q or sess["gaps"][0]["question"]
+            llm_res = generate_followup_question(english, e, sess["gaps"], sess.get("language", "en"), history=turns)
+            if isinstance(llm_res, dict):
+                q_en = llm_res.get("question_en")
+                q_native = llm_res.get("question_native")
+                if q_en and q_en != "INTAKE_COMPLETE":
+                    sess["next_question"] = q_en
+                    sess["next_question_en"] = q_en
+                    sess["next_question_native"] = q_native
+                else:
+                    sess["next_question"] = None
+                    sess["next_question_en"] = None
+                    sess["next_question_native"] = None
+            elif isinstance(llm_res, str) and llm_res != "INTAKE_COMPLETE":
+                sess["next_question"] = llm_res
+                sess["next_question_en"] = llm_res
+                sess["next_question_native"] = None
+            else:
+                gap_q = sess["gaps"][0]["question"]
+                sess["next_question"] = gap_q
+                sess["next_question_en"] = gap_q
+                sess["next_question_native"] = None
         except Exception:
-            sess["next_question"] = sess["gaps"][0]["question"]
-        if sess["next_question"] == "INTAKE_COMPLETE":
+            gap_q = sess["gaps"][0]["question"]
+            sess["next_question"] = gap_q
+            sess["next_question_en"] = gap_q
+            sess["next_question_native"] = None
+        if sess.get("next_question") == "INTAKE_COMPLETE":
             sess["next_question"] = None
+            sess["next_question_en"] = None
+            sess["next_question_native"] = None
     else:
         sess["next_question"] = None
+        sess["next_question_en"] = None
+        sess["next_question_native"] = None
     sess["readback_en"] = readback_en(e)
 
     sess["updated_at"] = now_dt.isoformat()
@@ -1321,6 +1350,8 @@ def new_session(source: str = "patient", language: str = "en", channel: str = "k
         "emergency_guidance": None,
         "summary": None,
         "next_question": None,
+        "next_question_en": None,
+        "next_question_native": None,
         "readback_en": None,
         "handoff": None,
         "audit": [],
@@ -1328,6 +1359,10 @@ def new_session(source: str = "patient", language: str = "en", channel: str = "k
         "eta_minutes": None,
         "telemetry": None,
         "confirmed": False,
+        "lifecycle_status": "active",
+        "archived_at": None,
+        "verified_at": None,
+        "verified_by": None,
     }
 
 
@@ -1361,14 +1396,20 @@ def apply_override(sess: dict, nurse_id: str, action: str, new_tier: str | None,
     if new_tier not in TIERS:
         raise ValueError(f"Invalid target tier '{new_tier}'. Allowed: {', '.join(TIERS)}")
 
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     sess.setdefault("audit", []).append({
         "nurse_id": nurse_id.strip(),
         "action": action,
         "old_tier": old,
         "new_tier": new_tier,
         "reason": reason.strip(),
-        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "at": now_iso,
     })
     sess["final_tier"] = new_tier
     sess["status"] = "verified"
+    sess["lifecycle_status"] = "archived"
+    sess["archived_at"] = sess.get("archived_at") or now_iso
+    sess["verified_at"] = sess.get("verified_at") or now_iso
+    sess["verified_by"] = nurse_id.strip()
+    sess["reviewed_at"] = sess.get("reviewed_at") or now_iso
     return sess

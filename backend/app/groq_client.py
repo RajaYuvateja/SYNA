@@ -166,17 +166,42 @@ def generate_followup_question(
     gaps: list[dict],
     language: str = "en",
     history: list[str] | None = None,
-) -> str | None:
-    """Uses Groq LLM to generate a single context-aware, clinically prioritized follow-up inquiry based on gaps and dialogue history."""
+) -> dict[str, str] | None:
+    """Uses Groq LLM to generate a single context-aware, clinically prioritized follow-up inquiry based on gaps and dialogue history.
+    Returns a dict with paired 'question_en' (English) and 'question_native' (target language).
+    """
     client = get_groq_client()
     if not client or not gaps:
         return None
 
-    system_prompt = """You are a compassionate clinical triage intake assistant.
-Based on the patient's statement, conversation history, and missing protocol gaps, generate EXACTLY ONE clarifying question.
+    clean_lang = (language or "en").split("-")[0].lower()
+    LANG_NAMES = {
+        "te": "Telugu (తెలుగు)",
+        "ta": "Tamil (தமிழ்)",
+        "hi": "Hindi (हिन्दी)",
+        "kn": "Kannada (ಕನ್ನಡ)",
+        "ml": "Malayalam (മലയാളം)",
+        "bn": "Bengali (বাংলা)",
+        "mr": "Marathi (मराठी)",
+        "en": "English",
+    }
+    target_lang_name = LANG_NAMES.get(clean_lang, clean_lang)
+
+    system_prompt = f"""You are a compassionate clinical triage intake assistant for a multilingual hospital emergency platform.
+Based on the patient's statement, conversation history, and missing protocol gaps, generate EXACTLY ONE clinically relevant clarifying question.
 Do NOT repeat any questions that have already been answered in the conversation history.
-Safety principle: Never diagnose, prescribe, or propose treatment. Only ask for missing symptom details.
-Respond ONLY with the question itself in a concise, gentle tone."""
+Safety principle: Never diagnose, prescribe, or propose treatment. Only ask for missing symptom details (such as onset time, radiation of pain, severity, or associated distress).
+
+Respond ONLY with valid JSON in this exact structure:
+{{
+  "question_en": "<the question in English>",
+  "question_native": "<the exact same question translated into {target_lang_name}>"
+}}
+Rules:
+1. "question_en" MUST be in English only. Never output Telugu or other Indic script in "question_en".
+2. "question_native" MUST be in {target_lang_name} (if target language is English, keep it in English).
+3. Both questions must express the exact same clinical meaning.
+4. Keep the tone concise, gentle, and clear."""
 
     history_ctx = "\n".join([f"- {h}" for h in history]) if history else f"- {text}"
     user_prompt = (
@@ -184,7 +209,7 @@ Respond ONLY with the question itself in a concise, gentle tone."""
         f"Latest Statement: {text}\n"
         f"Chief Complaint: {entities.get('chief_complaint')}\n"
         f"Missing Protocol Gaps: {[g.get('missing') for g in gaps]}\n"
-        f"Target Language: {language}"
+        f"Target Language: {target_lang_name}"
     )
 
     try:
@@ -194,10 +219,38 @@ Respond ONLY with the question itself in a concise, gentle tone."""
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            response_format={"type": "json_object"},
             temperature=0.2,
-            max_tokens=100,
+            max_tokens=250,
         )
-        return response.choices[0].message.content.strip().strip('"')
+        content = response.choices[0].message.content.strip()
+        data = json.loads(content)
+        q_en = str(data.get("question_en") or "").strip().strip('"')
+        q_native = str(data.get("question_native") or "").strip().strip('"')
+
+        # Check if Indic characters accidentally leaked into question_en
+        has_indic_in_en = any('\u0900' <= char <= '\u0d7f' for char in q_en)
+        if has_indic_in_en:
+            if not any('\u0900' <= char <= '\u0d7f' for char in q_native) and q_native:
+                q_en, q_native = q_native, q_en
+            else:
+                translated_en = translate_with_groq(q_en, source_lang=clean_lang, target_lang="en")
+                if translated_en and not any('\u0900' <= char <= '\u0d7f' for char in translated_en):
+                    q_native = q_en
+                    q_en = translated_en
+
+        if not q_native and q_en:
+            if clean_lang == "en":
+                q_native = q_en
+            else:
+                q_native = translate_with_groq(q_en, source_lang="en", target_lang=clean_lang) or q_en
+
+        if q_en or q_native:
+            return {
+                "question_en": q_en or q_native,
+                "question_native": q_native or q_en,
+            }
+        return None
     except Exception:
         return None
 
